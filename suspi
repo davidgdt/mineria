@@ -1,0 +1,87 @@
+import os
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D
+
+# ==============================
+# 1. RUTAS DE ENTRADA / SALIDA
+# ==============================
+base_dir = os.getcwd()   # ← CORREGIDO: funciona en Jupyter / Colab
+
+input_folder = os.path.join(base_dir, 'MOCK')
+output_folder = os.path.join(base_dir, 'SUSPI2')
+
+# ==============================
+# 2. CARGAR IMÁGENES
+# ==============================
+frames = sorted([f for f in os.listdir(input_folder))
+print(f'Hay {len(frames)} imágenes extraídas en MOCK')
+
+frame_data = []
+images = []
+target_size = (128, 128)
+
+for frame_file in frames:
+    img_path = os.path.join(input_folder, frame_file)
+    img = cv2.imread(img_path)
+
+    if img is None:
+        continue
+
+    full_frame = cv2.resize(img, target_size)
+    full_frame = full_frame.astype('float32') / 255.0
+
+    images.append(full_frame)
+    frame_data.append((frame_file, img))
+
+images = np.array(images)
+print(f'Se han cargado y procesado {images.shape[0]} frames.')
+
+# ==============================
+# 3. DEFINIR AUTOENCODER
+# ==============================
+def build_model(input_shape):
+    input_img = Input(shape=input_shape)
+
+    x = Conv2D(32, (3, 3), activation='relu', padding='same')(input_img)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+    encoded = MaxPooling2D((2, 2), padding='same')(x)
+
+    x = Conv2D(64, (3, 3), activation='relu', padding='same')(encoded)
+    x = UpSampling2D((2, 2))(x)
+    x = Conv2D(32, (3, 3), activation='relu', padding='same')(x)
+    x = UpSampling2D((2, 2))(x)
+    decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
+
+    return Model(input_img, decoded)
+
+input_shape = (target_size[0], target_size[1], 3)
+autoencoder = build_model(input_shape)
+autoencoder.compile(optimizer='adam', loss='mse')
+
+# ==============================
+# 4. ENTRENAMIENTO
+# ==============================
+autoencoder.fit(images, images, epochs=20, batch_size=32, shuffle=True, verbose=1)
+
+# ==============================
+# 5. DETECCIÓN DE ANOMALÍAS
+# ==============================
+reconstructions = autoencoder.predict(images)
+reconstruction_error = np.mean((reconstructions - images)**2, axis=(1,2,3))
+
+threshold = np.percentile(reconstruction_error, 95)
+print("Umbral de anomalía:", threshold)
+
+num_sospechosos = 0
+
+for idx, error in enumerate(reconstruction_error):
+    if error > threshold:
+        frame_file, img = frame_data[idx]
+        cv2.imwrite(os.path.join(output_folder, frame_file), img)
+        num_sospechosos += 1
+
+print(f"Se han guardado {num_sospechosos} frames sospechosos en {output_folder}")
