@@ -1,0 +1,119 @@
+import os
+import cv2
+import numpy as np
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D
+from tensorflow.keras.callbacks import EarlyStopping
+
+#########################################
+# 1. RUTAS Y CARGA DE IMÁGENES
+#########################################
+
+base_dir = os.getcwd()
+
+input_folder = os.path.join(base_dir, "POKEMON")
+output_folder = os.path.join(base_dir, "PREDICCION")
+os.makedirs(output_folder, exist_ok=True)
+
+files = sorted([f for f in os.listdir(input_folder)])
+images_list = []
+
+for filename in files:
+    img_path = os.path.join(input_folder, filename)
+    img = cv2.imread(img_path)
+    images_list.append(img)
+
+# División: entrenamiento (todas menos 10) / test (últimas 10)
+training_images = images_list[:-10]
+test_images = images_list[-10:]
+
+#########################################
+# 2. PREPROCESSING
+#########################################
+
+def preprocessing(image_list):
+    target_size = (128, 128)
+    input_images = []
+    output_images = []
+    scaler = 255.0
+
+    for img in image_list:
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img_rgb, target_size)
+
+        # Entrada en gris
+        img_gray = cv2.cvtColor(img_resized, cv2.COLOR_RGB2GRAY)
+
+        input_images.append(img_gray / scaler)
+        output_images.append(img_resized / scaler)
+
+    input_images = np.array(input_images).reshape(len(input_images), 128, 128, 1)
+    output_images = np.array(output_images)
+
+    return (input_images, output_images), scaler
+
+#########################################
+# 3. TRAINING (AUTOENCODER)
+#########################################
+
+def training(data):
+    X_train, Y_train = data
+    input_shape = X_train.shape[1:]
+    input_img = Input(shape=input_shape)
+
+    # Encoder
+    x = Conv2D(64, (3, 3), activation='relu', padding='same')(input_img)
+    x = MaxPooling2D((2, 2), padding='same')(x)
+    x = Conv2D(128, (3, 3), activation='relu', padding='same')(x)
+    encoded = MaxPooling2D((2, 2), padding='same')(x)
+
+    # Decoder
+    x = Conv2D(128, (3, 3), activation='relu', padding='same')(encoded)
+    x = UpSampling2D((2, 2))(x)
+    x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+    x = UpSampling2D((2, 2))(x)
+
+    decoded = Conv2D(3, (3, 3), activation='sigmoid', padding='same')(x)
+
+    model = Model(input_img, decoded)
+    model.compile(optimizer='adam', loss='mse')
+
+    early_stop = EarlyStopping(monitor='loss', patience=5, restore_best_weights=True)
+
+    history = model.fit(
+        X_train, Y_train,
+        epochs=10,
+        batch_size=32,
+        shuffle=True,
+        verbose=1,
+        callbacks=[early_stop]
+    )
+
+    return model, history
+
+#########################################
+# 4. EVALUATION
+#########################################
+
+def evaluation(test_images, model, history):
+    target_size = (128, 128)
+    print(f"Guardando predicciones en: {output_folder}")
+
+    for idx, img in enumerate(test_images):
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img_rgb, target_size)
+        img_gray = cv2.cvtColor(img_resized, cv2.COLOR_RGB2GRAY)
+
+        X_test = img_gray.reshape(1, 128, 128, 1) / 255.0
+        prediction = model.predict(X_test, verbose=0)[0]
+
+        img_pred_bgr = cv2.cvtColor((prediction * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+        cv2.imwrite(os.path.join(output_folder, f'prediccion_{idx}.jpg'), img_pred_bgr)
+
+#########################################
+# 5. EJECUCIÓN
+#########################################
+
+data, scaler = preprocessing(training_images)
+model, history = training(data)
+evaluation(test_images, model, history)
