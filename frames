@@ -1,0 +1,50 @@
+import os
+import cv2
+
+# -----------------------------
+# 1. RUTAS
+# -----------------------------
+base_dir = os.getcwd()             # carpeta del proyecto
+video_path = os.path.join(base_dir, 'DATA', 'video.mp4')
+output_folder = os.path.join(base_dir, 'MOCK')
+
+
+# -----------------------------
+# 2. ABRIR EL VÍDEO
+# -----------------------------
+cap = cv2.VideoCapture(video_path)
+
+# -----------------------------
+# 3. PROPIEDADES DEL VÍDEO
+# -----------------------------
+fps = cap.get(cv2.CAP_PROP_FPS)
+frame_interval = int(fps * 0.5)   # un frame cada 0.5 segundos
+
+# -----------------------------
+# 4. EXTRAER FRAMES
+# -----------------------------
+frame_count = 0
+saved_index = 0
+
+while True:
+    ret, frame = cap.read()
+
+    if not ret:       # fin del vídeo
+        break
+
+    # Guardar cada X frames
+    if frame_count % frame_interval == 0:
+        frame_name = f"frame_{saved_index}.jpg"
+        cv2.imwrite(os.path.join(output_folder, frame_name), frame)
+        saved_index += 1
+
+    frame_count += 1
+
+# -----------------------------
+# 5. CERRAR
+# -----------------------------
+cap.release()
+cv2.destroyAllWindows()
+
+print(f"Frames extraídos correctamente: {saved_index}")
+print(f"Guardados en: {output_folder}")
